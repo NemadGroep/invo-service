@@ -3,9 +3,6 @@ name: Release
 on:
   push:
     tags: ["v[0-9]+.[0-9]+.[0-9]+"]
-
-env:
-  IMG: ghcr.io/${{github.repository}}
   
 jobs:
   build:
@@ -22,6 +19,11 @@ jobs:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Set lowercase image name
+        env:
+          GITHUB_REPO: ${{ github.repository }}
+        run: |
+          echo "IMG=ghcr.io/${GITHUB_REPO,,}" >> $GITHUB_ENV
       - name: Create image tags
         id: tags
         uses: docker/metadata-action@v5
