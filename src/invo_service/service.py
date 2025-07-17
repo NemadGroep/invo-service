@@ -1,5 +1,6 @@
 import os
 import time
+import redis
 import logging
 from pathlib import Path
 from lib_ftep import FTEP
@@ -13,9 +14,17 @@ ftp = FTEP()
 mailbox = Mailbox()
 form_recognizer = FormRecognizer()
 
+r = redis.Redis(os.getenv('REDIS_HOST'), port=os.getenv('REDIS_PORT'), decode_responses=True)
+
 logging.basicConfig(level=logging.DEBUG)
 
+# PRODUCTION
 DATA_ROOT = Path("/data")
+
+# TESTING
+#HERE = Path(__file__).resolve().parent
+#DATA_ROOT = HERE.parent.parent / "data"
+
 CRIT_PATH = DATA_ROOT / "business_subject_criteria.json"
 MODELMAP_PATH = DATA_ROOT / "business_models_map.json"
 RESULT_PATH = DATA_ROOT / "result.json"
@@ -34,7 +43,7 @@ def main():
 
         try:
             uids = mailbox.list_uids()
-            metadata = mailbox.extract_minimal_metadata(uids)
+            mailbox.set_metadata_redis(r, uids)
         except Exception:
             logging.exception("Failed to list or extract metadata from emails")
             time.sleep(60)
@@ -44,11 +53,11 @@ def main():
                 logging.info("Processing invoice: %s from %s", invoice.subject, invoice.business)
 
                 # PRODUCTION
-                result = form_recognizer.analyze_document(MODELMAP_PATH, invoice)
+                #result = form_recognizer.analyze_document(MODELMAP_PATH, invoice)
 
                 # TESTING
                 #write_json(RESULT_PATH, result)
-                #result = read_json(RESULT_PATH)
+                result = read_json(RESULT_PATH)
 
                 try:
                     result_parsed_numbers = form_recognizer.parse_numbers(result)
@@ -66,11 +75,13 @@ def main():
                 except Exception:
                     logging.exception("Failed to configure kv pairs for invoice")
                     mailbox.uid = invoice.uid
+                    r.delete(invoice.uid)
                     mailbox.flag_email(invoice.uid)
                     continue
 
                 if invoice.type == "NULL":
                     logging.info("Invoice type is NULL, skipping further processing")
+                    r.delete(invoice.uid)
                     mailbox.delete_email(invoice.uid)
                     continue
 
@@ -78,13 +89,15 @@ def main():
                     idoc.configure_idoc(invoice)
                     try:
                         ftp.connect()
-                        ftp.upload_idoc(idoc)
-                        ftp.upload_pdf(invoice)
-                        mailbox.delete_email(invoice.uid)
+                        #ftp.upload_idoc(idoc)
+                        #ftp.upload_pdf(invoice)
+                        r.delete(invoice.uid)
+                        #mailbox.delete_email(invoice.uid)
                         ftp.disconnect()
                     except Exception:
                         logging.exception("Failed to upload IDOC or PDF to FTP")
                         mailbox.uid = invoice.uid
+                        r.delete(invoice.uid)
                         mailbox.flag_email(invoice.uid)
                     continue
                 
@@ -100,11 +113,13 @@ def main():
                     except Exception:
                         logging.exception("Failed to upload IDOC or PDF to FTP")
                         mailbox.uid = invoice.uid
+                        r.delete(invoice.uid)
                         mailbox.flag_email(invoice.uid)
                     continue
             else:
                 logging.info("Email with subject '%s' does not meet criteria for processing", invoice.subject)
                 mailbox.uid = invoice.uid
+                r.delete(invoice.uid)
                 mailbox.flag_email(invoice.uid)
         
         logging.info("Sleeping for 60 seconds before checking for new emails")
@@ -112,7 +127,6 @@ def main():
 
 if __name__ == "__main__":
     main()
-                
 
         
             
