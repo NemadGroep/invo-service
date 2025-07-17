@@ -5,7 +5,7 @@ services:
     ports:
       - "6379:6379"
 
-  app:
+  invo-service:
     build:
       context: .
       dockerfile: Dockerfile
@@ -19,4 +19,21 @@ services:
     environment:
       REDIS_HOST: redis
       REDIS_PORT: "6379"
-      
+      INVO_API_HOST: "localhost"
+      INVO_API_PORT: "8080"
+      ENV: "development"
+  
+  frontend:
+    build:
+      context: ../invo-frontend
+      dockerfile: Dockerfile
+    ports:
+      - "3000:5173"
+    volumes:
+      - ../invo-frontend:/app:rw
+      - /app/node_modules
+    depends_on:
+      - invo-service
+    environment:
+      VITE_API_URL: http://localhost:8080
+      NODE_ENV: production

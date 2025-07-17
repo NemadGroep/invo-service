@@ -11,7 +11,7 @@ ENV POETRY_VIRTUALENVS_IN_PROJECT=true \
 
 RUN poetry install --only main --no-interaction --no-ansi && rm -rf $POETRY_CACHE_DIR
 
-CMD ["poetry", "run", "python", "src/invo_service/service.py"]
+EXPOSE 8080
 
-
-
+CMD ["poetry", "run", "uvicorn", "src.invo_service.service:app", \
+     "--host", "0.0.0.0", "--port", "8080", "--reload"]

@@ -2,13 +2,17 @@ import os
 import time
 import redis
 import logging
+import threading
 from pathlib import Path
 from lib_ftep import FTEP
+from fastapi import FastAPI
 from lib_mail import Mailbox
 from lib_invoice import Invoice
 from lib_idoc.invoice import IDOC
-from lib_azure.ai_document_intelligence import FormRecognizer
+from uvicorn import Config, Server
 from lib_utilys import read_json, write_json
+from fastapi.middleware.cors import CORSMiddleware
+from lib_azure.ai_document_intelligence import FormRecognizer
 
 ftp = FTEP()
 mailbox = Mailbox()
@@ -21,7 +25,7 @@ logging.basicConfig(level=logging.DEBUG)
 # PRODUCTION
 DATA_ROOT = Path("/data")
 
-# TESTING
+# DEVELOPMENT
 #HERE = Path(__file__).resolve().parent
 #DATA_ROOT = HERE.parent.parent / "data"
 
@@ -36,10 +40,71 @@ STARTSEG_PATH = DATA_ROOT / "static_segment_start.xml"
 DYNSEG_PATH = DATA_ROOT / "dynamic_segment.xml"
 ENDSEG_PATH = DATA_ROOT / "static_segment_end.xml"
 
-def main():
+SLIDER_VALUE = 1
+SLIDER_LOCK = threading.Lock()
 
-    mailbox.initialize_uid(slider_value=1)
+def get_slider_value():
+    """Get the current slider value in a thread-safe manner."""
+    with SLIDER_LOCK:
+        return SLIDER_VALUE
+    
+def set_slider_value(value: int):
+    """Set the slider value in a thread-safe manner."""
+    global SLIDER_VALUE
+    with SLIDER_LOCK:
+        SLIDER_VALUE = value
+
+def start_mainloop():
+    """Start the main processing loop in a separate thread."""
+    thread = threading.Thread(target=mainloop)
+    thread.start()
+
+app = FastAPI(title="Invoice Processing Queue")
+
+@app.on_event("startup")
+async def startup_event():
+    """Initialize the mailbox and start the main processing loop."""
+    start_mainloop()
+
+if os.getenv('ENV') == 'development':
+    app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:3000"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+    )
+
+@app.get("/metadata")
+async def list_messages():
+    """Return all stored metadata rows from Redis."""
+    rows = []
+    for uid in r.keys('*'):
+        h = r.hgetall(uid)
+        if h:
+            rows.append({
+                'uid': uid,
+                'business': h.get('business'),
+                'subject': h.get('subject'),
+            })
+    return rows
+
+@app.post("/slider")
+async def update_slider(payload: dict):
+    """
+    Expects JSON {"value": 1}.
+    """
+    value = payload.get("value")
+    if not isinstance(value, int):
+        return {"error": "value must be an integer"}, 400
+
+    set_slider_value(value)
+    return {"value": get_slider_value()}
+
+def mainloop():
     while True:
+        mailbox.initialize_uid(slider_value=get_slider_value())
+        logging.info("Starting main processing loop with slider value: %d", get_slider_value())
 
         try:
             uids = mailbox.list_uids()
@@ -124,13 +189,6 @@ def main():
         
         logging.info("Sleeping for 60 seconds before checking for new emails")
         time.sleep(60)
-
-if __name__ == "__main__":
-    main()
-
-        
-            
-
 
             
 
